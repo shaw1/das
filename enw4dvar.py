@@ -23,12 +23,15 @@ class enw4dvar(object):
     Attributes:
         model: A class specifying the underlying model dynamics.
     
-        Bdata: Symmetric band matrix representing the background error
-            covariance, stored in lower form. For example, if B is a 6
-            by 6 matrix with bandwidth 2, then Bdata is stored as:
+        sqrtBdata: The band Cholesky factorization of the background
+            error covariance matrix that stored in lower form. For
+            example, if B is a 6 by 6 matrix with bandwidth 2, then
+            B is stored as:
                 b00 b11 b22 b33 b44 b55
                 b10 b21 b32 b43 b54 *
                 b20 b31 b42 b53 *   *
+            A band diagonal matrix needs to be stored with shape
+            (1, n).
     
         sigo_squared: Observation error variance vector.
     
@@ -52,9 +55,6 @@ class enw4dvar(object):
         Cb: Symmetric band matrix representing the localization matrix
             for the ensemble model error covariance matrices. This is
             stored in the same way as Bdata.
-    
-        sqrtBdata: The band Cholesky factorization of Bdata, computed
-            from the specification of Bdata.
     
         nobs: The number of observations, computed as the length of
             obsloc.
@@ -127,8 +127,8 @@ class enw4dvar(object):
         blkFprod: Product of block matrix F with a four-dimensional
             vector.
     
-        blkFprod_adj: Product of block matrix F^T with a four-dimensional
-            vector.
+        blkFprod_adj: Product of block matrix F^T with a
+            four-dimensional vector.
     
         blkFinvprod: Product of F^(-1) and a vector.
     
@@ -187,7 +187,7 @@ class enw4dvar(object):
             the transpose of a band lower triangular matrix with a
             vector.
     """
-    def __init__(self, model, Bdata, sigo_squared, Qdata, q, window, obsloc, \
+    def __init__(self, model, sqrtBdata, sigo_squared, Qdata, q, window, obsloc, \
                  Cb):
         """Initializes the class object to the specified inputs.
 
@@ -195,7 +195,7 @@ class enw4dvar(object):
         above.
         """
         self.model = model
-        self.Bdata = Bdata
+        self.sqrtBdata = sqrtBdata
         self.sigo_squared = sigo_squared
         self.Qdata = Qdata
         self.q = q
@@ -204,7 +204,6 @@ class enw4dvar(object):
         self.Cb = Cb
 
         # Computation of data members derived from arguments
-        self.sqrtBdata = la.cholesky_banded(Bdata, lower=True)
         self.nobs = len(obsloc[0])
         self.sqrtCb = la.cholesky_banded(Cb, lower=True)
         self.sigo = np.sqrt(sigo_squared)
@@ -221,7 +220,10 @@ class enw4dvar(object):
         Returns:
             Matrix-vector product.
         """
-        return self._symmetric_band_product(self.Bdata, x)
+        y = self._lower_triangular_band_product_adj(self.sqrtBdata, x)
+        y = self._lower_triangular_band_product(self.sqrtBdata, y)
+
+        return y
 
     def sqrtBprod(self, x):
         """Computes the product B^(1/2) * x.

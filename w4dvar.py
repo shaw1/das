@@ -20,10 +20,11 @@ class w4dvar(object):
         model: A class specifying the underlying model dynamics that
             includes member functions forecast, forecast_tlm, and
             forecast_adj.
-    
-        Bdata: Symmetric band matrix representing the background error
-            covariance, stored in lower form. For example, if B is a 6
-            by 6 matrix with bandwidth 2, then Bdata is stored as:
+
+        sqrtBdata: The band Cholesky factorization of the background
+            error covariance matrix that stored in lower form. For
+            example, if B is a 6 by 6 matrix with bandwidth 2, then
+            B is stored as:
                 b00 b11 b22 b33 b44 b55
                 b10 b21 b32 b43 b54 *
                 b20 b31 b42 b53 *   *
@@ -45,10 +46,6 @@ class w4dvar(object):
             observed. If the state vector x == [x0, x1, x2, x3] and
             obsloc == np.array([1, 2]), then y = h(x) returns
             y == [x1, x2].
-    
-        sqrtBdata: The band Cholesky factorization of Bdata, computed
-            from the specification of Bdata using
-            scipy.linalg.cholesky_banded, stored in lower form.
     
         nobs: The number of observations, computed as the length of
             obsloc[0].
@@ -180,9 +177,6 @@ class w4dvar(object):
         _ConjugateGradient: Conjugate gradient algorithm used for the
             incremental method.
 
-        _symmetric_band_product: Product of a band symmetric matrix
-            stored in lower form.
-
         _lower_triangular_band_product: Computes the product of a band
             lower triangular matrix with a vector.
 
@@ -193,14 +187,14 @@ class w4dvar(object):
         _compute_sigma_squared: Computes variance from band Cholesky
             factor of covariance.
     """
-    def __init__(self, model, Bdata, sigo_squared, sqrtQdata, q, window, \
+    def __init__(self, model, sqrtBdata, sigo_squared, sqrtQdata, q, window, \
                  obsloc):
         """Initializes the class object to the specified inputs.
 
         Descriptions of each data member is provided in the comments above.
         """
         self.model = model
-        self.Bdata = Bdata
+        self.sqrtBdata = sqrtBdata
         self.sigo_squared = sigo_squared
         self.sqrtQdata = sqrtQdata
         self.q = q
@@ -208,7 +202,6 @@ class w4dvar(object):
         self.obsloc = obsloc
 
         # Computation of data members derived from arguments
-        self.sqrtBdata = la.cholesky_banded(Bdata, lower=True)
         self.nobs = len(obsloc[0])
         self.sigo = np.sqrt(sigo_squared)
         self.sigq_squared = [self._compute_sigma_squared(Q) for Q in
@@ -218,15 +211,18 @@ class w4dvar(object):
         """Computes the product B * x.
 
         The background error covariance matrix is set using the band matrix
-        Bdata.
+        sqrtBdata.
 
         Argument:
             x: Vector to multiply.
 
         Returns:
             Matrix-vector product.
-        """
-        return self._symmetric_band_product(self.Bdata, x)
+        """    
+        y = self._lower_triangular_band_product_adj(self.sqrtBdata, x)
+        y = self._lower_triangular_band_product(self.sqrtBdata, y)
+
+        return y
         
     def Binvprod(self, x):
         """Computes the product B^(-1) * x via the Cholesky factor.
@@ -1134,29 +1130,6 @@ class w4dvar(object):
             k += 1
 
         return (x, k)
-
-    def _symmetric_band_product(self, Lb, x):
-        """Product of a symmetric band matrix with a vector.
-
-        The matrix is assumed to be stored in lower form.
-
-        """
-        (p_plus_one, n) = Lb.shape
-        p = p_plus_one - 1   # Bandwidth
-        y = np.empty(n)
-
-        for i in xrange(n):
-            temp = 0.0
-
-            for j in xrange(max(0, i - p), i):
-                temp += Lb[i - j, j] * x[j]
-
-            for j in xrange(i, min(i + p_plus_one, n)):
-                temp += Lb[j - i, i] * x[j]
-
-            y[i] = temp
-
-        return y
 
     def _lower_triangular_band_product(self, Lb, x):
         """Computes the product L * x, where L is lower triangular.

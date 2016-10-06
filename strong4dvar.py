@@ -21,12 +21,15 @@ class strong4dvar(object):
             includes member functions forecast, forecast_tlm, and
             forecast_adj.
     
-        Bdata: Symmetric band matrix representing the background error
-            covariance, stored in lower form. For example, if B is a 6
-            by 6 matrix with bandwidth 2, then Bdata is stored as:
+        sqrtBdata: The band Cholesky factorization of the background
+            error covariance matrix that stored in lower form. For
+            example, if B is a 6 by 6 matrix with bandwidth 2, then
+            B is stored as:
                 b00 b11 b22 b33 b44 b55
                 b10 b21 b32 b43 b54 *
                 b20 b31 b42 b53 *   *
+            A band diagonal matrix needs to be stored with shape
+            (1, n).
     
         sigo_squared: Observation error variance vector.
     
@@ -36,10 +39,6 @@ class strong4dvar(object):
             observed. If the state vector x == [x0, x1, x2, x3] and
             obsloc == np.array([1, 2]), then y = h(x) returns
             y == [x1, x2].
-    
-        sqrtBdata: The band Cholesky factorization of Bdata, computed
-            from the specification of Bdata using
-            scipy.linalg.cholesky_banded, stored in lower form.
     
         nobs: The number of observations, computed as the length of
             obsloc[0].
@@ -130,21 +129,27 @@ class strong4dvar(object):
 
         _ConjugateGradient: Conjugate gradient algorithm used for the
             incremental method.
+
+        _lower_triangular_band_product: Computes the product of a band
+            lower triangular matrix with a vector.
+
+        _lower_triangular_band_product_adj: Computes the product of
+            the transpose of a band lower triangular matrix with a
+            vector.
     """
-    def __init__(self, model, Bdata, sigo_squared, window, obsloc):
+    def __init__(self, model, sqrtBdata, sigo_squared, window, obsloc):
         """Initializes the class object to the specified inputs.
 
         Descriptions of each data member is provided in the comments
         above.
         """
         self.model = model
-        self.Bdata = Bdata
+        self.sqrtBdata = sqrtBdata
         self.sigo_squared = sigo_squared
         self.window = window
         self.obsloc = obsloc
 
         # Computation of data members derived from arguments
-        self.sqrtBdata = la.cholesky_banded(Bdata, lower=True)
         self.nobs = len(obsloc[0])
         self.sigo = np.sqrt(sigo_squared)
 
@@ -152,7 +157,7 @@ class strong4dvar(object):
         """Computes the product B * x.
 
         The background error covariance matrix is set using the band
-        matrix Bdata.
+        matrix sqrtBdata.
 
         Argument:
             x: Vector to multiply.
@@ -160,21 +165,8 @@ class strong4dvar(object):
         Returns:
             Matrix-vector product.
         """
-        Bdata = self.Bdata
-        (p_plus_one, n) = Bdata.shape
-        p = p_plus_one - 1   # Bandwidth
-        y = np.empty(n)
-
-        for i in xrange(n):
-            temp = 0.0
-
-            for j in xrange(max(0, i - p), i):
-                temp += Bdata[i - j, j] * x[j]
-
-            for j in xrange(i, min(i + p_plus_one, n)):
-                temp += Bdata[j - i, i] * x[j]
-
-            y[i] = temp
+        y = self._lower_triangular_band_product_adj(self.sqrtBdata, x)
+        y = self._lower_triangular_band_product(self.sqrtBdata, y)
 
         return y
         
@@ -205,28 +197,7 @@ class strong4dvar(object):
         Returns:
             Matrix-vector product B^(1/2) * x.
         """
-        Lb = self.sqrtBdata
-        (p_plus_one, n) = Lb.shape
-        p = p_plus_one - 1   # Bandwidth of the matrix
-        y = np.empty(n)
-
-        for i in xrange(p):
-            temp = 0.0
-
-            for j in xrange(i + 1):
-                temp += Lb[i - j, j] * x[j]
-
-            y[i] = temp
-
-        for i in xrange(p, n):
-            temp = 0.0
-
-            for j in xrange(i - p, i + 1):
-                temp += Lb[i - j, j] * x[j]
-
-            y[i] = temp
-
-        return y
+        return self._lower_triangular_band_product(self.sqrtBdata, x)
 
     def sqrtBprod_adj(self, x):
         """Computes the product B^(T/2) * x.
@@ -240,28 +211,7 @@ class strong4dvar(object):
         Returns:
             Matrix-vector product B^(T/2) * x.
         """
-        Lb = self.sqrtBdata
-        (p_plus_one, n) = Lb.shape
-        p = p_plus_one - 1   # Bandwidth of the matrix
-        y = np.empty(n)
-
-        for i in xrange(n - p):
-            temp = 0.0
-
-            for j in xrange(i, i + p_plus_one):
-                temp += Lb[j - i, i] * x[j]
-
-            y[i] = temp
-
-        for i in xrange(n - p, n):
-            temp = 0.0
-
-            for j in xrange(i, n):
-                temp += Lb[j - i, i] * x[j]
-
-            y[i] = temp
-
-        return y
+        return self._lower_triangular_band_product_adj(self.sqrtBdata, x)
 
     def Rprod(self, x):
         """Product of R with a vector x.
@@ -784,7 +734,7 @@ class strong4dvar(object):
             # [sqrtRinv * blkH * B * blkH.T * sqrtRinv.T + I] * chi =
             # sqrtRinv * d, where z = sqrtRinv.T * chi
             b = self.blksqrtRinvprod(d)
-        
+
             chi0 = np.zeros(b.shape)
             (chi, k) = self._ConjugateGradient(chi0, \
                        self.Preconditioned_by_R_HessianProduct, b, tol, xb)
@@ -851,3 +801,67 @@ class strong4dvar(object):
             k += 1
 
         return (x, k)
+
+    def _lower_triangular_band_product(self, Lb, x):
+        """Computes the product L * x, where L is lower triangular.
+
+        Arguments:
+            Lb: Banded lower triangular matrix.
+            x: Vector to multiply.
+
+        Returns:
+            y: Matrix-vector product L * x.
+        """
+        (p_plus_one, n) = Lb.shape
+        p = p_plus_one - 1   # Bandwidth of the matrix
+        y = np.empty(n)
+
+        for i in xrange(p):
+            temp = 0.0
+
+            for j in xrange(i + 1):
+                temp += Lb[i - j, j] * x[j]
+
+            y[i] = temp
+
+        for i in xrange(p, n):
+            temp = 0.0
+
+            for j in xrange(i - p, i + 1):
+                temp += Lb[i - j, j] * x[j]
+
+            y[i] = temp
+
+        return y
+
+    def _lower_triangular_band_product_adj(self, Lb, x):
+        """Computes the product Lb.T * x, where Lb is lower triangular.
+
+        Arguments:
+            Lb: Banded lower triangular matrix.
+            x: Vector to multiply.
+
+        Returns:
+            y: Matrix-vector product L.T * x.
+        """
+        (p_plus_one, n) = Lb.shape
+        p = p_plus_one - 1   # Bandwidth of the matrix
+        y = np.empty(n)
+
+        for i in xrange(n - p):
+            temp = 0.0
+
+            for j in xrange(i, i + p_plus_one):
+                temp += Lb[j - i, i] * x[j]
+
+            y[i] = temp
+
+        for i in xrange(n - p, n):
+            temp = 0.0
+
+            for j in xrange(i, n):
+                temp += Lb[j - i, i] * x[j]
+
+            y[i] = temp
+
+        return y

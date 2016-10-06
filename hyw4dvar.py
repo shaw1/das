@@ -44,7 +44,7 @@ class hyw4dvar(enw4dvar):
         sqrtPprod_adj: Product of the square root of the
             four-dimensional covariance model transpose with a vector.
     """
-    def __init__(self, model, Bdata, sigo_squared, Qdata, q, window, obsloc,
+    def __init__(self, model, sqrtBdata, sigo_squared, Qdata, q, window, obsloc,
                  Cb, sigq_squared_c, alpha):
         """Initializes the class object to the specified inputs.
 
@@ -52,7 +52,7 @@ class hyw4dvar(enw4dvar):
         above. The __init__ of the super class enw4dvar is called to
         initialize the components of the parent class.
         """
-        super(hyw4dvar, self).__init__(model, Bdata, sigo_squared, Qdata, q, \
+        super(hyw4dvar, self).__init__(model, sqrtBdata, sigo_squared, Qdata, q, \
                                        window, obsloc, Cb)
 
         self.alpha = alpha                   # Hybrid scalar weight
