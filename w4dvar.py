@@ -6,6 +6,150 @@ import numpy as np
 import scipy.linalg as la
 import math
 
+def ConjugateGradient(x0, matrix_vector_product, b, tol, xg):
+    """Conjugate gradient method for use in incremental function.
+
+    Conjugate gradient method to solve a linear system within
+    tolerance.  This code is written for use with the Hessian of the
+    w4D-Var cost functional, which requires the four-dimensional guess
+    state xg as an argument.
+
+    Arguments:
+        x0: Initial guess to initiate conjugate gradient method
+        matrix_vector_product: Function reference to matrix-vector
+            product
+        b: Right-hand-side of linear system
+        tol: Error tolerance
+        xg: Four-dimensional guess state
+
+    Returns:
+        x: Solution to linear system
+        k: Number of iterations to convergence within tolerance
+    """
+    x = x0.copy()
+    r = b - matrix_vector_product(x, xg)
+    p = r.copy()
+    k = 0
+    n = len(x0)
+    r_old_scalar = np.dot(r, r)
+    r_new_scalar = r_old_scalar
+
+    while(k < n and math.sqrt(r_new_scalar) >= tol):
+        A_times_p = matrix_vector_product(p, xg)
+        alpha = r_old_scalar / np.dot(p, A_times_p)
+        x += alpha * p
+        r -= alpha * A_times_p
+        r_new_scalar = np.dot(r, r)
+        beta = r_new_scalar / r_old_scalar
+        p *= beta
+        p += r
+        r_old_scalar = r_new_scalar
+
+        k += 1
+
+    return (x, k)
+
+def lower_triangular_band_product(Lb, x):
+    """Computes the product L * x, where L is lower triangular.
+
+    Arguments:
+        Lb: Banded lower triangular matrix.
+        x: Vector to multiply.
+
+    Returns:
+        y: Matrix-vector product L * x.
+    """
+    (p_plus_one, n) = Lb.shape
+    p = p_plus_one - 1   # Bandwidth of the matrix
+    y = np.empty(n)
+
+    for i in xrange(p):
+        temp = 0.0
+
+        for j in xrange(i + 1):
+            temp += Lb[i - j, j] * x[j]
+
+        y[i] = temp
+
+    for i in xrange(p, n):
+        temp = 0.0
+
+        for j in xrange(i - p, i + 1):
+            temp += Lb[i - j, j] * x[j]
+
+        y[i] = temp
+
+    return y
+
+def lower_triangular_band_product_adj(Lb, x):
+    """Computes the product Lb.T * x, where Lb is lower triangular.
+
+    Arguments:
+        Lb: Banded lower triangular matrix.
+        x: Vector to multiply.
+
+    Returns:
+        y: Matrix-vector product L.T * x.
+    """
+    (p_plus_one, n) = Lb.shape
+    p = p_plus_one - 1   # Bandwidth of the matrix
+    y = np.empty(n)
+
+    for i in xrange(n - p):
+        temp = 0.0
+
+        for j in xrange(i, i + p_plus_one):
+            temp += Lb[j - i, i] * x[j]
+
+        y[i] = temp
+
+    for i in xrange(n - p, n):
+        temp = 0.0
+
+        for j in xrange(i, n):
+            temp += Lb[j - i, i] * x[j]
+
+        y[i] = temp
+
+    return y
+
+def compute_sigma_squared(Lb):
+    """Computes variance from band Cholesky factor of covariance.
+
+    The variance of a covariance matrix is the diagonal of said
+    matrix. This function computes the diagonal from the band
+    Cholesky factor of a covariance matrix, which is stored in
+    lower form.
+
+    Argument:
+        Lb: Band Cholesky factor of a covariance matrix.
+
+    Returns:
+        sigma_squared: Variance vector.
+    """
+    (p_plus_one, n) = Lb.shape
+    p = p_plus_one - 1   # Bandwidth of the matrix
+    sigma_squared = np.empty(n)
+
+    for i in xrange(p):
+        temp = 0.0
+
+        for j in xrange(0, i + 1):
+            temp += Lb[i - j, j] ** 2
+
+        sigma_squared[i] = temp
+
+    for i in xrange(p, n):
+        temp = 0.0
+
+        for j in xrange(i - p, i + 1):
+            temp += Lb[i - j, j] ** 2
+
+        sigma_squared[i] = temp
+
+    return sigma_squared
+
+
 class w4dvar(object):
     """Weak-constraint four-dimensional variational data assimilation.
 
@@ -173,25 +317,13 @@ class w4dvar(object):
             of the cost functional preconditioned by sqrtR.
     
         incremental: Incremental algorithm for the w4D-Var.
-
-        _ConjugateGradient: Conjugate gradient algorithm used for the
-            incremental method.
-
-        _lower_triangular_band_product: Computes the product of a band
-            lower triangular matrix with a vector.
-
-        _lower_triangular_band_product_adj: Computes the product of
-            the transpose of a band lower triangular matrix with a
-            vector.
-
-        _compute_sigma_squared: Computes variance from band Cholesky
-            factor of covariance.
     """
-    def __init__(self, model, sqrtBdata, sigo_squared, sqrtQdata, q, window, \
-                 obsloc):
+    def __init__(self, model, sqrtBdata, sigo_squared, sqrtQdata, q, \
+                 window, obsloc):
         """Initializes the class object to the specified inputs.
 
-        Descriptions of each data member is provided in the comments above.
+        Descriptions of each data member is provided in the comments
+        above.
         """
         self.model = model
         self.sqrtBdata = sqrtBdata
@@ -204,14 +336,14 @@ class w4dvar(object):
         # Computation of data members derived from arguments
         self.nobs = len(obsloc[0])
         self.sigo = np.sqrt(sigo_squared)
-        self.sigq_squared = [self._compute_sigma_squared(Q) for Q in
+        self.sigq_squared = [compute_sigma_squared(Q) for Q in
                              self.sqrtQdata]
 
     def Bprod(self, x):
         """Computes the product B * x.
 
-        The background error covariance matrix is set using the band matrix
-        sqrtBdata.
+        The background error covariance matrix is set using the band
+        matrix sqrtBdata.
 
         Argument:
             x: Vector to multiply.
@@ -219,8 +351,8 @@ class w4dvar(object):
         Returns:
             Matrix-vector product.
         """    
-        y = self._lower_triangular_band_product_adj(self.sqrtBdata, x)
-        y = self._lower_triangular_band_product(self.sqrtBdata, y)
+        y = lower_triangular_band_product_adj(self.sqrtBdata, x)
+        y = lower_triangular_band_product(self.sqrtBdata, y)
 
         return y
         
@@ -242,8 +374,8 @@ class w4dvar(object):
     def sqrtBprod(self, x):
         """Computes the product B^(1/2) * x.
 
-        Using the Cholesky factorization of B, stored as sqrtBdata, the
-        product of B^(1/2) with x is computed.
+        Using the Cholesky factorization of B, stored as sqrtBdata,
+        the product of B^(1/2) with x is computed.
 
         Argument:
             x: Vector to multiply.
@@ -251,13 +383,13 @@ class w4dvar(object):
         Returns:
             Matrix-vector product B^(1/2) * x.
         """
-        return self._lower_triangular_band_product(self.sqrtBdata, x)
+        return lower_triangular_band_product(self.sqrtBdata, x)
 
     def sqrtBprod_adj(self, x):
         """Computes the product B^(T/2) * x.
 
-        Using the Cholesky factorization of B, stored as sqrtBdata, the
-        product of B^(1/2) with x is computed.
+        Using the Cholesky factorization of B, stored as sqrtBdata,
+        the product of B^(1/2) with x is computed.
 
         Argument:
             x: Vector to multiply.
@@ -265,7 +397,7 @@ class w4dvar(object):
         Returns:
             Matrix-vector product B^(T/2) * x.
         """
-        return self._lower_triangular_band_product_adj(self.sqrtBdata, x)
+        return lower_triangular_band_product_adj(self.sqrtBdata, x)
 
     def Rprod(self, x):
         """Product of R with a vector x.
@@ -365,8 +497,8 @@ class w4dvar(object):
         Returns:
             y: Product of Q[i] with x.
         """
-        y = self._lower_triangular_band_product_adj(self.sqrtQdata[i], x)
-        y = self._lower_triangular_band_product(self.sqrtQdata[i], y)
+        y = lower_triangular_band_product_adj(self.sqrtQdata[i], x)
+        y = lower_triangular_band_product(self.sqrtQdata[i], y)
 
         return y
 
@@ -400,7 +532,7 @@ class w4dvar(object):
         Returns:
             Product of the Cholesky factor of Q[i] with x.
         """
-        return self._lower_triangular_band_product(self.sqrtQdata[i], x)
+        return lower_triangular_band_product(self.sqrtQdata[i], x)
 
     def sqrtQprod_adj(self, x, i):
         """Product of sqrtQ[i].T with a vector x.
@@ -416,7 +548,7 @@ class w4dvar(object):
         Returns:
             Product of sqrtQ[i].T with x.
         """
-        return self._lower_triangular_band_product_adj(self.sqrtQdata[i], x)
+        return lower_triangular_band_product_adj(self.sqrtQdata[i], x)
 
     def forecast(self, x, ndt=1):
         """Nonlinear forecast model.
@@ -522,14 +654,14 @@ class w4dvar(object):
         
         return xb
 
-    """The rest of the methods apply to x being a four-dimensional state."""
+    # The rest of the methods apply to x being a four-dimensional state.
     
     def blkh(self, x):
         """Four-dimensional observation operator.
 
-        Since the three-dimensional observation operator is linear, this
-        four-dimensional operator is linear for each block of x, where
-        x = [x[0], x[1], ..., x[window - 1]].
+        Since the three-dimensional observation operator is linear,
+        this four-dimensional operator is linear for each block of x,
+        where x = [x[0], x[1], ..., x[window - 1]].
 
         Argument:
             x: Four-dimensional state vector.
@@ -567,8 +699,9 @@ class w4dvar(object):
         yd = np.empty(window * nobs)
 
         for j in xrange(window):
-            yd[j * nobs : (j + 1) * nobs] = self.h_tlm(x[j * n : (j + 1) * n], \
-            xd[j * n : (j + 1) * n], j)
+            yd[j * nobs : (j + 1) * nobs] = \
+                self.h_tlm(x[j * n : (j + 1) * n], \
+                           xd[j * n : (j + 1) * n], j)
 
         return yd
 
@@ -591,8 +724,9 @@ class w4dvar(object):
         xb = np.empty(window * n)
 
         for j in xrange(window):
-            xb[j * n : (j + 1) * n] = self.h_adj(x[j * n : (j + 1) * n], \
-            yb[j * nobs : (j + 1) * nobs], j)
+            xb[j * n : (j + 1) * n] = \
+                self.h_adj(x[j * n : (j + 1) * n], \
+                           yb[j * nobs : (j + 1) * nobs], j)
 
         return xb
 
@@ -616,7 +750,8 @@ class w4dvar(object):
             behind = np.arange((i - 1) * n, i * n)
             current = np.arange(i * n, (i + 1) * n)
         
-            y[current] = self.forecast_tlm(x[behind], y[behind]) + xd[current]
+            y[current] = self.forecast_tlm(x[behind], y[behind]) \
+                         + xd[current]
 
         return y
 
@@ -634,13 +769,15 @@ class w4dvar(object):
         window = self.window
         
         y = np.empty(window * n)
-        y[(window - 1) * n : window * n] = yb[(window - 1) * n : window * n]
+        y[(window - 1) * n : window * n] = \
+                            yb[(window - 1) * n : window * n]
 
         for i in xrange(window - 2, -1, -1):
             current = np.arange(i * n, (i + 1) * n)
             ahead = np.arange((i + 1) * n, (i + 2) * n)
 
-            y[current] = self.forecast_adj(x[current], y[ahead]) + yb[current]
+            y[current] = self.forecast_adj(x[current], y[ahead]) + \
+                         yb[current]
 
         return y
 
@@ -664,7 +801,8 @@ class w4dvar(object):
             behind = np.arange((i - 1) * n, i * n)
             current = np.arange(i * n, (i + 1) * n)
 
-            y[current] = xd[current] - self.forecast_tlm(x[behind], xd[behind])
+            y[current] = xd[current] - self.forecast_tlm(x[behind], \
+                                                         xd[behind])
 
         return y
 
@@ -682,13 +820,15 @@ class w4dvar(object):
         window = self.window
 
         y = np.empty(window * n)
-        y[(window - 1) * n : window * n] = yb[(window - 1) * n : window * n]
+        y[(window - 1) * n : window * n] = \
+                        yb[(window - 1) * n : window * n]
 
         for i in xrange(0, window - 1):
             current = np.arange(i * n, (i + 1) * n)
             ahead = np.arange((i + 1) * n, (i + 2) * n)
 
-            y[current] = yb[current] - self.forecast_adj(x[current], yb[ahead])
+            y[current] = yb[current] - \
+                         self.forecast_adj(x[current], yb[ahead])
 
         return y
 
@@ -980,11 +1120,12 @@ class w4dvar(object):
     def incremental(self, xb, xg_list, y_list, tol, option):
         """The incremental algorithm for solving w4D-Var.
 
-        Two options for minimizing the cost functional are available, where
-        the linear system can be solved in state space (option == "StateSpace")
-        using sqrtP preconditioning, in observation space (option ==
-        "ObsSpace") which uses sqrtR preconditioning, or in state space without
-        any preconditioning (option == "Unconditioned").
+        Two options for minimizing the cost functional are available,
+        where the linear system can be solved in state space (option
+        == "StateSpace") using sqrtP preconditioning, in observation
+        space (option == "ObsSpace") which uses sqrtR preconditioning,
+        or in state space without any preconditioning (option ==
+        "Unconditioned").
 
         Inputs:
             xb: Background state.
@@ -1003,11 +1144,11 @@ class w4dvar(object):
         nobs = self.nobs
         total_nobs = window * nobs
         
-        xg = np.array(xg_list).flatten(0)           # Vectorized guess state
+        xg = np.array(xg_list).flatten(0)     # Vectorized guess state
         q = np.array([np.zeros(n)] + \
-                     [self.q[j] for j in xrange(window - 1)]).flatten(0) # Bias
-        d = np.empty(total_nobs)                    # Observed minus guess
-        g = np.empty(n * window)                    # Guess vector
+            [self.q[j] for j in xrange(window - 1)]).flatten(0) # Bias
+        d = np.empty(total_nobs)              # Observed minus guess
+        g = np.empty(n * window)              # Guess vector
 
         # Sets four-dimensional vector d = y - h(xg)
         for j in xrange(window): 
@@ -1024,8 +1165,8 @@ class w4dvar(object):
             g[current] = self.forecast(xg_list[j - 1]) - xg_list[j]
 
         if option == "StateSpace":
-            # Conjugate gradient method for solving the state space linear
-            # system
+            # Conjugate gradient method for solving the state space
+            # linear system
             # [blkFinv.T * Pinv * blkFinv + blkH.T * blkRinv * blkH] * deltax
             # = blkFinv.T * Pinv * [g + q] + blkH.T * blkRinv * d
             # by preconditioning using sqrtP to get
@@ -1042,8 +1183,8 @@ class w4dvar(object):
             b = self.sqrtPprod_adj(b)
 
             chi0 = np.zeros(b.shape) # Guess for chi
-            (chi, k) = self._ConjugateGradient(chi0, \
-                       self.Preconditioned_by_P_HessianProduct, b, tol, xg)
+            (chi, k) = ConjugateGradient(chi0, \
+                  self.Preconditioned_by_P_HessianProduct, b, tol, xg)
 
             deltax = self.blkFprod(xg, self.sqrtPprod(chi) + g + q)
         elif option == "ObsSpace":
@@ -1060,8 +1201,8 @@ class w4dvar(object):
             b = self.blksqrtRinvprod(b)
         
             chi0 = np.zeros(b.shape)
-            (chi, k) = self._ConjugateGradient(chi0, \
-                       self.Preconditioned_by_R_HessianProduct, b, tol, xg)
+            (chi, k) = ConjugateGradient(chi0, \
+                  self.Preconditioned_by_R_HessianProduct, b, tol, xg)
 
             z = self.blksqrtRinvprod_adj(chi)
             deltax = self.blkh_adj(xg, z)
@@ -1079,7 +1220,7 @@ class w4dvar(object):
             b += self.blkh_adj(xg, self.blkRinvprod(d))
 
             deltax0 = np.zeros(b.shape)
-            (deltax, k) = self._ConjugateGradient(deltax0, \
+            (deltax, k) = ConjugateGradient(deltax0, \
                           self.HessianProduct, b, tol, xg)
         else:
             raise ValueError("Choose a valid option.")
@@ -1088,145 +1229,3 @@ class w4dvar(object):
         xa_list = [xa[j * n : (j + 1) * n] for j in xrange(0, window)]
 
         return (xa_list, k)
-
-    def _ConjugateGradient(self, x0, matrix_vector_product, b, tol, xg):
-        """Conjugate gradient method for use in incremental function.
-
-        Conjugate gradient method to solve a linear system within tolerance.
-        This code is written for use with the Hessian of the w4D-Var cost
-        functional, which requires the four-dimensional guess state xg as an
-        argument.
-
-        Arguments:
-            x0: Initial guess to initiate conjugate gradient method
-            matrix_vector_product: Function reference to matrix-vector product
-            b: Right-hand-side of linear system
-            tol: Error tolerance
-            xg: Four-dimensional guess state
-
-        Returns:
-            x: Solution to linear system
-            k: Number of iterations to convergence within tolerance
-        """
-        x = x0.copy()
-        r = b - matrix_vector_product(x, xg)
-        p = r.copy()
-        k = 0
-        n = len(x0)
-        r_old_scalar = np.dot(r, r)
-        r_new_scalar = r_old_scalar
-        
-        while(k < n and math.sqrt(r_new_scalar) >= tol):
-            A_times_p = matrix_vector_product(p, xg)
-            alpha = r_old_scalar / np.dot(p, A_times_p)
-            x += alpha * p
-            r -= alpha * A_times_p
-            r_new_scalar = np.dot(r, r)
-            beta = r_new_scalar / r_old_scalar
-            p *= beta
-            p += r
-            r_old_scalar = r_new_scalar
-            
-            k += 1
-
-        return (x, k)
-
-    def _lower_triangular_band_product(self, Lb, x):
-        """Computes the product L * x, where L is lower triangular.
-
-        Arguments:
-            Lb: Banded lower triangular matrix.
-            x: Vector to multiply.
-
-        Returns:
-            y: Matrix-vector product L * x.
-        """
-        (p_plus_one, n) = Lb.shape
-        p = p_plus_one - 1   # Bandwidth of the matrix
-        y = np.empty(n)
-
-        for i in xrange(p):
-            temp = 0.0
-
-            for j in xrange(i + 1):
-                temp += Lb[i - j, j] * x[j]
-
-            y[i] = temp
-
-        for i in xrange(p, n):
-            temp = 0.0
-
-            for j in xrange(i - p, i + 1):
-                temp += Lb[i - j, j] * x[j]
-
-            y[i] = temp
-
-        return y
-
-    def _lower_triangular_band_product_adj(self, Lb, x):
-        """Computes the product Lb.T * x, where Lb is lower triangular.
-
-        Arguments:
-            Lb: Banded lower triangular matrix.
-            x: Vector to multiply.
-
-        Returns:
-            y: Matrix-vector product L.T * x.
-        """
-        (p_plus_one, n) = Lb.shape
-        p = p_plus_one - 1   # Bandwidth of the matrix
-        y = np.empty(n)
-
-        for i in xrange(n - p):
-            temp = 0.0
-
-            for j in xrange(i, i + p_plus_one):
-                temp += Lb[j - i, i] * x[j]
-
-            y[i] = temp
-
-        for i in xrange(n - p, n):
-            temp = 0.0
-
-            for j in xrange(i, n):
-                temp += Lb[j - i, i] * x[j]
-
-            y[i] = temp
-
-        return y
-
-    def _compute_sigma_squared(self, Lb):
-        """Computes variance from band Cholesky factor of covariance.
-
-        The variance of a covariance matrix is the diagonal of said
-        matrix. This function computes the diagonal from the band
-        Cholesky factor of a covariance matrix, which is stored in
-        lower form.
-
-        Argument:
-            Lb: Band Cholesky factor of a covariance matrix.
-
-        Returns:
-            sigma_squared: Variance vector.
-        """
-        (p_plus_one, n) = Lb.shape
-        p = p_plus_one - 1   # Bandwidth of the matrix
-        sigma_squared = np.empty(n)
-
-        for i in xrange(p):
-            temp = 0.0
-        
-            for j in xrange(0, i + 1):
-                temp += Lb[i - j, j] ** 2
-
-            sigma_squared[i] = temp
-
-        for i in xrange(p, n):
-            temp = 0.0
-
-            for j in xrange(i - p, i + 1):
-                temp += Lb[i - j, j] ** 2
-
-            sigma_squared[i] = temp
-
-        return sigma_squared

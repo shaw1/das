@@ -44,16 +44,16 @@ class hyw4dvar(enw4dvar):
         sqrtPprod_adj: Product of the square root of the
             four-dimensional covariance model transpose with a vector.
     """
-    def __init__(self, model, sqrtBdata, sigo_squared, Qdata, q, window, obsloc,
-                 Cb, sigq_squared_c, alpha):
+    def __init__(self, model, sqrtBdata, sigo_squared, Qdata, q, \
+                 window, obsloc, Cb, sigq_squared_c, alpha):
         """Initializes the class object to the specified inputs.
 
         Descriptions of each data member is provided in the comments
         above. The __init__ of the super class enw4dvar is called to
         initialize the components of the parent class.
         """
-        super(hyw4dvar, self).__init__(model, sqrtBdata, sigo_squared, Qdata, q, \
-                                       window, obsloc, Cb)
+        super(hyw4dvar, self).__init__(model, sqrtBdata, \
+                sigo_squared, Qdata, q, window, obsloc, Cb)
 
         self.alpha = alpha                   # Hybrid scalar weight
         self.sigq_squared_c = sigq_squared_c # Variance for diagonal Qc
@@ -83,8 +83,9 @@ class hyw4dvar(enw4dvar):
     def sqrtQprod(self, x, i):
         """Product of Q^(1 / 2) with x, using covariance localization.
 
-        The matrix is a rectangular matrix of size n by n * (Ne + 1), and is
-        Q = [sqrt(1 - alpha) * (C * Qe)^(1 / 2)   sqrt(alpha) * Qc^(1 / 2)].
+        The matrix is a rectangular matrix of size n by n * (Ne + 1),
+        and is Q = [sqrt(1 - alpha) * (C * Qe)^(1 / 2) sqrt(alpha) *
+        Qc^(1 / 2)].
         
         Arguments:
             x: The vector to multiply of length n.
@@ -99,15 +100,17 @@ class hyw4dvar(enw4dvar):
         y = math.sqrt(1.0 - self.alpha) * \
             super(hyw4dvar, self).sqrtQprod(x[0 : Ne_times_n], i)
 
-        y += np.sqrt(self.alpha * self.sigq_squared_c) * x[Ne_times_n :]
+        y += np.sqrt(self.alpha * self.sigq_squared_c) * \
+             x[Ne_times_n :]
 
         return y
 
     def sqrtQprod_adj(self, x, i):
         """Product of Q^(T / 2) with x, using covariance localization.
 
-        The matrix is a rectangular matrix of size n by n * (Ne + 1), and is
-        Q = [sqrt(1 - alpha) * (C * Qe)^(1 / 2)   sqrt(alpha) * Qc^(1 / 2)].
+        The matrix is a rectangular matrix of size n by n * (Ne + 1),
+        and is Q = [sqrt(1 - alpha) * (C * Qe)^(1 / 2) sqrt(alpha) *
+        Qc^(1 / 2)].
         
         Arguments:
             x: The vector to multiply of length n * (Ne + 1).
@@ -133,9 +136,9 @@ class hyw4dvar(enw4dvar):
 
         Since the square root matrix for Q is a wide rectangle matrix
         of dimension n by n * (Ne + 1), the input vector x is a large
-        vector of size (window - 1) * n * (Ne + 1) + n. The output vector
-        will be of the dimension of a four-dimensional vector, that
-        is, of length window * n.
+        vector of size (window - 1) * n * (Ne + 1) + n. The output
+        vector will be of the dimension of a four-dimensional vector,
+        that is, of length window * n.
 
         Argument:
             x: Vector of multiply.
@@ -165,10 +168,10 @@ class hyw4dvar(enw4dvar):
         """Product of P^(T / 2) with a vector.
 
         Since the adjoint of the square root matrix for Q is a tall
-        rectangle matrix of dimension n * (Ne + 1) by n, the input vector x
-        is of the length of a four-dimensional vector of length
-        window * n. The output vector will have a very large size of
-        length (window - 1) * n * (Ne + 1) + n.
+        rectangle matrix of dimension n * (Ne + 1) by n, the input
+        vector x is of the length of a four-dimensional vector of
+        length window * n. The output vector will have a very large
+        size of length (window - 1) * n * (Ne + 1) + n.
 
         Argument:
             x: Four-dimensional vector to multiply.

@@ -6,6 +6,114 @@ import numpy as np
 import scipy.linalg as la
 import math
 
+def ConjugateGradient(x0, matrix_vector_product, b, tol, xg):
+    """Conjugate gradient method for use in incremental function.
+
+    Conjugate gradient method to solve a linear system within
+    tolerance.  This code is written for use with the Hessian of the
+    w4D-Var cost functional, which requires the four-dimensional guess
+    state xg as an argument.
+
+    Arguments:
+        x0: Initial guess to initiate conjugate gradient method
+        matrix_vector_product: Function reference to matrix-vector
+            product
+        b: Right-hand-side of linear system
+        tol: Error tolerance
+        xg: Four-dimensional guess state
+
+    Returns:
+        x: Solution to linear system
+        k: Number of iterations to convergence within tolerance
+    """
+    x = x0.copy()
+    r = b - matrix_vector_product(x, xg)
+    p = r.copy()
+    k = 0
+    n = len(x0)
+    r_old_scalar = np.dot(r, r)
+    r_new_scalar = r_old_scalar
+
+    while(k < n and math.sqrt(r_new_scalar) >= tol):
+        A_times_p = matrix_vector_product(p, xg)
+        alpha = r_old_scalar / np.dot(p, A_times_p)
+        x += alpha * p
+        r -= alpha * A_times_p
+        r_new_scalar = np.dot(r, r)
+        beta = r_new_scalar / r_old_scalar
+        p *= beta
+        p += r
+        r_old_scalar = r_new_scalar
+
+        k += 1
+
+    return (x, k)
+
+def lower_triangular_band_product(Lb, x):
+    """Computes the product L * x, where L is lower triangular.
+
+    Arguments:
+        Lb: Banded lower triangular matrix.
+        x: Vector to multiply.
+
+    Returns:
+        y: Matrix-vector product L * x.
+    """
+    (p_plus_one, n) = Lb.shape
+    p = p_plus_one - 1   # Bandwidth of the matrix
+    y = np.empty(n)
+
+    for i in xrange(p):
+        temp = 0.0
+
+        for j in xrange(i + 1):
+            temp += Lb[i - j, j] * x[j]
+
+        y[i] = temp
+
+    for i in xrange(p, n):
+        temp = 0.0
+
+        for j in xrange(i - p, i + 1):
+            temp += Lb[i - j, j] * x[j]
+
+        y[i] = temp
+
+    return y
+
+def lower_triangular_band_product_adj(Lb, x):
+    """Computes the product Lb.T * x, where Lb is lower triangular.
+
+    Arguments:
+        Lb: Banded lower triangular matrix.
+        x: Vector to multiply.
+
+    Returns:
+        y: Matrix-vector product L.T * x.
+    """
+    (p_plus_one, n) = Lb.shape
+    p = p_plus_one - 1   # Bandwidth of the matrix
+    y = np.empty(n)
+
+    for i in xrange(n - p):
+        temp = 0.0
+
+        for j in xrange(i, i + p_plus_one):
+            temp += Lb[j - i, i] * x[j]
+
+        y[i] = temp
+
+    for i in xrange(n - p, n):
+        temp = 0.0
+
+        for j in xrange(i, n):
+            temp += Lb[j - i, i] * x[j]
+
+        y[i] = temp
+
+    return y
+
+
 class enw4dvar(object):
     """Ensemble weak-constraint 4D-Var.
 
@@ -173,22 +281,9 @@ class enw4dvar(object):
             of the cost functional preconditioned by sqrtR.
 
         incremental: Incremental algorithm for the w4D-Var.
-
-        _ConjugateGradient: Conjugate gradient algorithm used for the
-            incremental method.
-
-        _symmetric_band_product: Product of a band symmetric matrix
-            stored in lower form.
-
-        _lower_triangular_band_product: Computes the product of a band
-            lower triangular matrix with a vector.
-
-        _lower_triangular_band_product_adj: Computes the product of
-            the transpose of a band lower triangular matrix with a
-            vector.
     """
-    def __init__(self, model, sqrtBdata, sigo_squared, Qdata, q, window, obsloc, \
-                 Cb):
+    def __init__(self, model, sqrtBdata, sigo_squared, Qdata, q, \
+                 window, obsloc, Cb):
         """Initializes the class object to the specified inputs.
 
         Descriptions of each data member is provided in the comments
@@ -211,25 +306,26 @@ class enw4dvar(object):
     def Bprod(self, x):
         """Computes the product B * x.
 
-        The background error covariance matrix is set using the band matrix
-        Bdata.
+        The background error covariance matrix is set using the band
+        matrix Bdata.
 
         Argument:
             x: Vector to multiply.
 
         Returns:
             Matrix-vector product.
-        """
-        y = self._lower_triangular_band_product_adj(self.sqrtBdata, x)
-        y = self._lower_triangular_band_product(self.sqrtBdata, y)
 
+        """
+        y = lower_triangular_band_product_adj(self.sqrtBdata, x)
+        y = lower_triangular_band_product(self.sqrtBdata, y)
+        
         return y
 
     def sqrtBprod(self, x):
         """Computes the product B^(1/2) * x.
 
-        Using the Cholesky factorization of B, stored as sqrtBdata, the
-        product of B^(1/2) with x is computed.
+        Using the Cholesky factorization of B, stored as sqrtBdata,
+        the product of B^(1/2) with x is computed.
 
         Argument:
             x: Vector to multiply.
@@ -237,7 +333,7 @@ class enw4dvar(object):
         Returns:
             Matrix-vector product B^(1/2) * x.
         """
-        return self._lower_triangular_band_product(self.sqrtBdata, x)
+        return lower_triangular_band_product(self.sqrtBdata, x)
 
     def sqrtBprod_adj(self, x):
         """Computes the product B^(T/2) * x.
@@ -251,7 +347,7 @@ class enw4dvar(object):
         Returns:
             Matrix-vector product B^(T/2) * x.
         """
-        return self._lower_triangular_band_product_adj(self.sqrtBdata, x)
+        return lower_triangular_band_product_adj(self.sqrtBdata, x)
         
     def Rinvprod(self, x):
         """Product of R^(-1) with a vector x.
@@ -326,8 +422,8 @@ class enw4dvar(object):
     def Cprod(self, x):
         """Localization matrix-vector product.
 
-        The localization matrix is a symmetric band matrix stored in lower
-        form.
+        The localization matrix is a symmetric band matrix stored in
+        lower form.
 
         Argument:
             x: The vector to multiply.
@@ -335,7 +431,22 @@ class enw4dvar(object):
         Returns:
             y: Product of localization matrix with x.
         """
-        return self._symmetric_band_product(self.Cb, x)
+        (p_plus_one, n) = self.Cb.shape
+        p = p_plus_one - 1   # Bandwidth
+        y = np.empty(n)
+
+        for i in xrange(n):
+            temp = 0.0
+
+            for j in xrange(max(0, i - p), i):
+                temp += self.Cb[i - j, j] * x[j]
+
+            for j in xrange(i, min(i + p_plus_one, n)):
+                temp += self.Cb[j - i, i] * x[j]
+
+            y[i] = temp
+
+        return y
 
     def sqrtCprod(self, x):
         """Cholesky factor of the localization matrix-vector product.
@@ -346,7 +457,7 @@ class enw4dvar(object):
         Returns:
             Matrix-vector product C^(1/2) * x.
         """
-        return self._lower_triangular_band_product(self.sqrtCb, x)
+        return lower_triangular_band_product(self.sqrtCb, x)
 
     def sqrtCprod_adj(self, x):
         """The product C^(T/2) * x.
@@ -360,16 +471,16 @@ class enw4dvar(object):
         Returns:
             Matrix-vector product.
         """
-        return self._lower_triangular_band_product_adj(self.sqrtCb, x)
+        return lower_triangular_band_product_adj(self.sqrtCb, x)
 
     def Qprod(self, x, i):
         """Product of Q[i] with a vector x.
 
         The model error covariance is the sum of the outer product of
         the vectors stored in self.Qdata[i] with localization applied.
-        Utilizing the special structure of Q[i], the computation is
-        (C \circ Qe[i]) * x == sum((C * (x \circ q[j])) \circ q[j])
-        i is the index corresponding to Q[i] for time t_{i + 1} and q[j]
+        Utilizing the special structure of Q[i], the computation is (C
+        \circ Qe[i]) * x == sum((C * (x \circ q[j])) \circ q[j]) i is
+        the index corresponding to Q[i] for time t_{i + 1} and q[j]
         come from self.Qdata[i].
 
         Arguments:
@@ -379,13 +490,15 @@ class enw4dvar(object):
         Returns:
             Matrix-vector product.
         """
-        return np.sum([self.Cprod(x * q) * q for q in self.Qdata[i]], axis=0)
+        return np.sum([self.Cprod(x * q) * q for q in self.Qdata[i]],\
+                      axis=0)
 
     def sqrtQprod(self, x, i):
         """Product of Q^(1 / 2) with x, using covariance localization.
 
-        The matrix is a rectangular matrix of size n by (n * Ne), and is
-        (C * Qe)^(1 / 2) = [diag(x_1) C^(1 / 2), ..., diag(x_Ne) C^(1 / 2)].
+        The matrix is a rectangular matrix of size n by (n * Ne), and
+        is (C * Qe)^(1 / 2) = [diag(x_1) C^(1 / 2), ..., diag(x_Ne)
+        C^(1 / 2)].
         
         Arguments:
             x: The vector to multiply of length n * Ne.
@@ -410,8 +523,9 @@ class enw4dvar(object):
     def sqrtQprod_adj(self, x, i):
         """Product of Q^(T / 2) with x, using covariance localization.
 
-        The matrix is a rectangular matrix of size (n * Ne) by n, and is
-        (C * Qe)^(1 / 2) = [C^(T / 2) diag(x_1); ...; C^(T / 2) diag(x_Ne)].
+        The matrix is a rectangular matrix of size (n * Ne) by n, and
+        is (C * Qe)^(1 / 2) = [C^(T / 2) diag(x_1); ...; C^(T / 2)
+        diag(x_Ne)].
         
         Arguments:
             x: The vector to multiply of length n.
@@ -537,13 +651,13 @@ class enw4dvar(object):
         
         return xb
 
-    """The rest of the methods apply to x being a four-dimensional state."""
+    #The rest of the methods apply to x being a four-dimensional state.
     def blkh(self, x):
         """Four-dimensional observation operator.
 
-        Since the three-dimensional observation operator is linear, this
-        four-dimensional operator is linear for each block of x, where
-        x = [x[0], x[1], ..., x[window - 1]].
+        Since the three-dimensional observation operator is linear,
+        this four-dimensional operator is linear for each block of x,
+        where x = [x[0], x[1], ..., x[window - 1]].
 
         Argument:
             x: Four-dimensional state vector.
@@ -558,7 +672,8 @@ class enw4dvar(object):
         y = np.empty(window * nobs)
 
         for j in xrange(window):
-            y[j * nobs : (j + 1) * nobs] = self.h(x[j * n : (j + n) * n], j)
+            y[j * nobs : (j + 1) * nobs] = \
+                            self.h(x[j * n : (j + n) * n], j)
 
         return y
                 
@@ -581,8 +696,9 @@ class enw4dvar(object):
         yd = np.empty(window * nobs)
 
         for j in xrange(window):
-            yd[j * nobs : (j + 1) * nobs] = self.h_tlm(x[j * n : (j + 1) * n], \
-            xd[j * n : (j + 1) * n], j)
+            yd[j * nobs : (j + 1) * nobs] = \
+                self.h_tlm(x[j * n : (j + 1) * n], \
+                           xd[j * n : (j + 1) * n], j)
 
         return yd
     
@@ -605,8 +721,9 @@ class enw4dvar(object):
         xb = np.empty(window * n)
 
         for j in xrange(window):
-            xb[j * n : (j + 1) * n] = self.h_adj(x[j * n : (j + 1) * n], \
-            yb[j * nobs : (j + 1) * nobs], j)
+            xb[j * n : (j + 1) * n] = \
+                self.h_adj(x[j * n : (j + 1) * n], \
+                           yb[j * nobs : (j + 1) * nobs], j)
 
         return xb
 
@@ -630,7 +747,8 @@ class enw4dvar(object):
             behind = np.arange((i - 1) * n, i * n)
             current = np.arange(i * n, (i + 1) * n)
         
-            y[current] = self.forecast_tlm(x[behind], y[behind]) + xd[current]
+            y[current] = self.forecast_tlm(x[behind], y[behind]) + \
+                         xd[current]
 
         return y
 
@@ -648,13 +766,15 @@ class enw4dvar(object):
         window = self.window
         
         y = np.empty(window * n)
-        y[(window - 1) * n : window * n] = yb[(window - 1) * n : window * n]
+        y[(window - 1) * n : window * n] = \
+                            yb[(window - 1) * n : window * n]
 
         for i in xrange(window - 2, -1, -1):
             current = np.arange(i * n, (i + 1) * n)
             ahead = np.arange((i + 1) * n, (i + 2) * n)
 
-            y[current] = self.forecast_adj(x[current], y[ahead]) + yb[current]
+            y[current] = self.forecast_adj(x[current], y[ahead]) + \
+                         yb[current]
 
         return y
 
@@ -678,7 +798,8 @@ class enw4dvar(object):
             behind = np.arange((i - 1) * n, i * n)
             current = np.arange(i * n, (i + 1) * n)
 
-            y[current] = xd[current] - self.forecast_tlm(x[behind], xd[behind])
+            y[current] = xd[current] - self.forecast_tlm(x[behind], \
+                                                         xd[behind])
 
         return y
 
@@ -696,13 +817,15 @@ class enw4dvar(object):
         window = self.window
 
         y = np.empty(window * n)
-        y[(window - 1) * n : window * n] = yb[(window - 1) * n : window * n]
+        y[(window - 1) * n : window * n] = \
+                            yb[(window - 1) * n : window * n]
 
         for i in xrange(0, window - 1):
             current = np.arange(i * n, (i + 1) * n)
             ahead = np.arange((i + 1) * n, (i + 2) * n)
 
-            y[current] = yb[current] - self.forecast_adj(x[current], yb[ahead])
+            y[current] = yb[current] - self.forecast_adj(x[current], \
+                                                         yb[ahead])
 
         return y
 
@@ -754,7 +877,8 @@ class enw4dvar(object):
         y[0 : n] = self.sqrtBprod(x[0 : n])
 
         for i in xrange(window - 1):
-            x_index = np.arange(n + i * Ne_times_n, n + (i + 1) * Ne_times_n)
+            x_index = np.arange(n + i * Ne_times_n, n + (i + 1) * \
+                                Ne_times_n)
             y_index = np.arange((i + 1) * n, (i + 2) * n)
             
             y[y_index] = self.sqrtQprod(x[x_index], i)
@@ -787,7 +911,8 @@ class enw4dvar(object):
 
         for i in xrange(window - 1):
             x_index = np.arange((i + 1) * n, (i + 2) * n)
-            y_index = np.arange(n + i * Ne_times_n, n + (i + 1) * Ne_times_n)
+            y_index = np.arange(n + i * Ne_times_n, n + (i + 1) * \
+                                Ne_times_n)
 
             y[y_index] = self.sqrtQprod_adj(x[x_index], i)
 
@@ -943,18 +1068,18 @@ class enw4dvar(object):
     def incremental(self, xb, xg_list, y_list, tol, option):
         """The incremental algorithm for solving w4D-Var.
 
-        Two options for minimizing the cost functional are available, where
-        the linear system can be solved in state space (option == "StateSpace")
-        using sqrtP preconditioning or in observation space (option ==
-        "ObsSpace") which uses sqrtR preconditioning.
+        Two options for minimizing the cost functional are available,
+        where the linear system can be solved in state space (option
+        == "StateSpace") using sqrtP preconditioning or in observation
+        space (option == "ObsSpace") which uses sqrtR preconditioning.
 
         Inputs:
             xb: Background state.
             xg_list: List of guess states.
             y_list: List of observations.
             tol: Tolerance for conjugate gradient method.
-            option: Solve in state space or in observation space, using
-                preconditioning.
+            option: Solve in state space or in observation space,
+                using preconditioning.
 
         Returns:
             xa_list: List of analysis states.
@@ -965,11 +1090,11 @@ class enw4dvar(object):
         nobs = self.nobs
         total_nobs = window * nobs
         
-        xg = np.array(xg_list).flatten(0)           # Vectorized guess state
+        xg = np.array(xg_list).flatten(0)     # Vectorized guess state
         q = np.array([np.zeros(n)] + \
-                     [self.q[j] for j in xrange(window - 1)]).flatten(0) # Bias
-        d = np.empty(total_nobs)                    # Observed minus guess
-        g = np.empty(n * window)                    # Guess vector
+            [self.q[j] for j in xrange(window - 1)]).flatten(0) # Bias
+        d = np.empty(total_nobs)              # Observed minus guess
+        g = np.empty(n * window)              # Guess vector
 
         # Sets four-dimensional vector d = y - h(xg)
         for j in xrange(0, window): 
@@ -986,10 +1111,10 @@ class enw4dvar(object):
             g[current] = self.forecast(xg_list[j - 1]) - xg_list[j]
 
         if option == "StateSpace":
-            # Conjugate gradient method for solving the state space linear
-            # system
-            # [blkFinv.T * Pinv * blkFinv + blkH.T * blkRinv * blkH] * deltax
-            # = blkFinv.T * Pinv * [g + q] + blkH.T * blkRinv * d
+            # Conjugate gradient method for solving the state space
+            # linear system
+            # [blkFinv.T * Pinv * blkFinv + blkH.T * blkRinv * blkH] *
+            # deltax = blkFinv.T * Pinv * [g + q] + blkH.T * blkRinv * d
             # by preconditioning using sqrtP to get
             # [I + sqrtP.T * blkF.T * blkH.T * Rinv * blkH * blkF * sqrtP] *
             # chi = sqrtP.T * blkF.T * blkH.T * blkRinv * [d - blkH * blkF *
@@ -1004,14 +1129,15 @@ class enw4dvar(object):
             b = self.sqrtPprod_adj(b)
 
             chi0 = np.zeros(b.shape) # Guess for chi
-            (chi, k) = self._ConjugateGradient(chi0, \
-                       self.Preconditioned_by_P_HessianProduct, b, tol, xg)
+            (chi, k) = ConjugateGradient(chi0, \
+                  self.Preconditioned_by_P_HessianProduct, b, tol, xg)
 
             deltax = self.blkFprod(xg, self.sqrtPprod(chi) + g + q)
         elif option == "ObsSpace":
-            # Conjugate gradient method for solving the observation space
-            # linear system
-            # [blkH * F * P * F.T * blkH.T + R] * z = d - blkH * F * [g + q]
+            # Conjugate gradient method for solving the observation
+            # space linear system
+            # [blkH * F * P * F.T * blkH.T + R] * z =
+            # d - blkH * F * [g + q]
             # by preconditioning using sqrtR to get
             # [sqrtRinv * blkH * F * P * F.T * blkH.T * sqrtRinv.T + I] * chi =
             # sqrtRinv * (d - blkH * blkF * [g + q]), where z is
@@ -1022,8 +1148,8 @@ class enw4dvar(object):
             b = self.blksqrtRinvprod(b)
         
             chi0 = np.zeros(b.shape)
-            (chi, k) = self._ConjugateGradient(chi0, \
-                       self.Preconditioned_by_R_HessianProduct, b, tol, xg)
+            (chi, k) = ConjugateGradient(chi0, \
+                  self.Preconditioned_by_R_HessianProduct, b, tol, xg)
 
             z = self.blksqrtRinvprod_adj(chi)
             deltax = self.blkh_adj(xg, z)
@@ -1038,132 +1164,3 @@ class enw4dvar(object):
         xa_list = [xa[j * n : (j + 1) * n] for j in xrange(0, window)]
 
         return (xa_list, k)
-
-    def _ConjugateGradient(self, x0, matrix_vector_product, b, tol, xg):
-        """Conjugate gradient method for use in incremental function.
-
-        Conjugate gradient method to solve a linear system within tolerance.
-        This code is written for use with the Hessian of the w4D-Var cost
-        functional, which requires the four-dimensional guess state xg as an
-        argument.
-
-        Arguments:
-            x0: Initial guess to initiate conjugate gradient method
-            matrix_vector_product: Function reference to matrix-vector product
-            b: Right-hand-side of linear system
-            tol: Error tolerance
-            xg: Four-dimensional guess state
-
-        Returns:
-            x: Solution to linear system
-            k: Number of iterations to convergence within tolerance
-        """
-        x = x0.copy()
-        r = b - matrix_vector_product(x, xg)
-        p = r.copy()
-        k = 0
-        n = len(x0)
-        r_old_scalar = np.dot(r, r)
-        r_new_scalar = r_old_scalar
-        
-        while(k < n and math.sqrt(r_new_scalar) >= tol):
-            A_times_p = matrix_vector_product(p, xg)
-            alpha = r_old_scalar / np.dot(p, A_times_p)
-            x += alpha * p
-            r -= alpha * A_times_p
-            r_new_scalar = np.dot(r, r)
-            beta = r_new_scalar / r_old_scalar
-            p *= beta
-            p += r
-            r_old_scalar = r_new_scalar
-            
-            k += 1
-
-        return (x, k)
-
-    def _symmetric_band_product(self, Lb, x):
-        """Product of a symmetric band matrix with a vector.
-
-        The matrix is assumed to be stored in lower form.
-
-        """
-        (p_plus_one, n) = Lb.shape
-        p = p_plus_one - 1   # Bandwidth
-        y = np.empty(n)
-
-        for i in xrange(n):
-            temp = 0.0
-
-            for j in xrange(max(0, i - p), i):
-                temp += Lb[i - j, j] * x[j]
-
-            for j in xrange(i, min(i + p_plus_one, n)):
-                temp += Lb[j - i, i] * x[j]
-
-            y[i] = temp
-
-        return y
-
-    def _lower_triangular_band_product(self, Lb, x):
-        """Computes the product L * x, where L is lower triangular.
-
-        Arguments:
-            Lb: Banded lower triangular matrix.
-            x: Vector to multiply.
-
-        Returns:
-            y: Matrix-vector product L * x.
-        """
-        (p_plus_one, n) = Lb.shape
-        p = p_plus_one - 1   # Bandwidth of the matrix
-        y = np.empty(n)
-
-        for i in xrange(p):
-            temp = 0.0
-
-            for j in xrange(i + 1):
-                temp += Lb[i - j, j] * x[j]
-
-            y[i] = temp
-
-        for i in xrange(p, n):
-            temp = 0.0
-
-            for j in xrange(i - p, i + 1):
-                temp += Lb[i - j, j] * x[j]
-
-            y[i] = temp
-
-        return y
-
-    def _lower_triangular_band_product_adj(self, Lb, x):
-        """Computes the product Lb.T * x, where Lb is lower triangular.
-
-        Arguments:
-            Lb: Banded lower triangular matrix.
-            x: Vector to multiply.
-
-        Returns:
-            y: Matrix-vector product L.T * x.
-        """
-        (p_plus_one, n) = Lb.shape
-        p = p_plus_one - 1   # Bandwidth of the matrix
-        y = np.empty(n)
-
-        for i in xrange(n - p):
-            temp = 0.0
-
-            for j in xrange(i, i + p_plus_one):
-                temp += Lb[j - i, i] * x[j]
-
-            y[i] = temp
-
-        for i in xrange(n - p, n):
-            temp = 0.0
-
-            for j in xrange(i, n):
-                temp += Lb[j - i, i] * x[j]
-
-            y[i] = temp
-
-        return y

@@ -6,6 +6,113 @@ import numpy as np
 import scipy.linalg as la
 import math
 
+def ConjugateGradient(x0, matrix_vector_product, b, tol, xb):
+    """Conjugate gradient method for use in incremental function.
+
+    Conjugate gradient method to solve a linear system within
+    tolerance. This code is written for use with the Hessian of
+    the 4D-Var cost functional, which requires the background
+    state xb as an argument.
+
+    Arguments:
+        x0: Initial guess to initiate conjugate gradient method
+        matrix_vector_product: Function matrix-vector product
+        b: Right-hand-side of linear system
+        tol: Error tolerance
+        xb: Three-dimensional background state
+
+    Returns:
+        x: Solution to linear system
+        k: Number of iterations to convergence within tolerance
+    """
+    x = x0.copy()
+    r = b - matrix_vector_product(x, xb)
+    p = r.copy()
+    k = 0
+    n = len(x0)
+    r_old_scalar = np.dot(r, r)
+    r_new_scalar = r_old_scalar
+
+    while(k < n and math.sqrt(r_new_scalar) >= tol):
+        A_times_p = matrix_vector_product(p, xb)
+        alpha = r_old_scalar / np.dot(p, A_times_p)
+        x += alpha * p
+        r -= alpha * A_times_p
+        r_new_scalar = np.dot(r, r)
+        beta = r_new_scalar / r_old_scalar
+        p *= beta
+        p += r
+        r_old_scalar = r_new_scalar
+
+        k += 1
+
+    return (x, k)
+
+def lower_triangular_band_product(Lb, x):
+    """Computes the product L * x, where L is lower triangular.
+
+    Arguments:
+        Lb: Banded lower triangular matrix.
+        x: Vector to multiply.
+
+    Returns:
+        y: Matrix-vector product L * x.
+    """
+    (p_plus_one, n) = Lb.shape
+    p = p_plus_one - 1   # Bandwidth of the matrix
+    y = np.empty(n)
+
+    for i in xrange(p):
+        temp = 0.0
+
+        for j in xrange(i + 1):
+            temp += Lb[i - j, j] * x[j]
+
+        y[i] = temp
+
+    for i in xrange(p, n):
+        temp = 0.0
+
+        for j in xrange(i - p, i + 1):
+            temp += Lb[i - j, j] * x[j]
+
+        y[i] = temp
+
+    return y
+
+def lower_triangular_band_product_adj(Lb, x):
+    """Computes the product Lb.T * x, where Lb is lower triangular.
+
+    Arguments:
+        Lb: Banded lower triangular matrix.
+        x: Vector to multiply.
+
+    Returns:
+        y: Matrix-vector product L.T * x.
+    """
+    (p_plus_one, n) = Lb.shape
+    p = p_plus_one - 1   # Bandwidth of the matrix
+    y = np.empty(n)
+
+    for i in xrange(n - p):
+        temp = 0.0
+
+        for j in xrange(i, i + p_plus_one):
+            temp += Lb[j - i, i] * x[j]
+
+        y[i] = temp
+
+    for i in xrange(n - p, n):
+        temp = 0.0
+
+        for j in xrange(i, n):
+            temp += Lb[j - i, i] * x[j]
+
+        y[i] = temp
+
+    return y
+
+
 class strong4dvar(object):
     """Strong-constraint four-dimensional variational data assimilation.
 
@@ -126,16 +233,6 @@ class strong4dvar(object):
             preconditioned by sqrtR.
     
         incremental: Incremental algorithm for 4D-Var.
-
-        _ConjugateGradient: Conjugate gradient algorithm used for the
-            incremental method.
-
-        _lower_triangular_band_product: Computes the product of a band
-            lower triangular matrix with a vector.
-
-        _lower_triangular_band_product_adj: Computes the product of
-            the transpose of a band lower triangular matrix with a
-            vector.
     """
     def __init__(self, model, sqrtBdata, sigo_squared, window, obsloc):
         """Initializes the class object to the specified inputs.
@@ -165,8 +262,8 @@ class strong4dvar(object):
         Returns:
             Matrix-vector product.
         """
-        y = self._lower_triangular_band_product_adj(self.sqrtBdata, x)
-        y = self._lower_triangular_band_product(self.sqrtBdata, y)
+        y = lower_triangular_band_product_adj(self.sqrtBdata, x)
+        y = lower_triangular_band_product(self.sqrtBdata, y)
 
         return y
         
@@ -197,7 +294,7 @@ class strong4dvar(object):
         Returns:
             Matrix-vector product B^(1/2) * x.
         """
-        return self._lower_triangular_band_product(self.sqrtBdata, x)
+        return lower_triangular_band_product(self.sqrtBdata, x)
 
     def sqrtBprod_adj(self, x):
         """Computes the product B^(T/2) * x.
@@ -211,7 +308,7 @@ class strong4dvar(object):
         Returns:
             Matrix-vector product B^(T/2) * x.
         """
-        return self._lower_triangular_band_product_adj(self.sqrtBdata, x)
+        return lower_triangular_band_product_adj(self.sqrtBdata, x)
 
     def Rprod(self, x):
         """Product of R with a vector x.
@@ -722,7 +819,7 @@ class strong4dvar(object):
             b = self.sqrtBprod_adj(b)
 
             chi0 = np.zeros(b.shape) # Guess for chi
-            (chi, k) = self._ConjugateGradient(chi0, \
+            (chi, k) = ConjugateGradient(chi0, \
                        self.Preconditioned_by_B_HessianProduct, b, tol, xb)
 
             deltax = self.sqrtBprod(chi)
@@ -736,7 +833,7 @@ class strong4dvar(object):
             b = self.blksqrtRinvprod(d)
 
             chi0 = np.zeros(b.shape)
-            (chi, k) = self._ConjugateGradient(chi0, \
+            (chi, k) = ConjugateGradient(chi0, \
                        self.Preconditioned_by_R_HessianProduct, b, tol, xb)
 
             z = self.blksqrtRinvprod_adj(chi)
@@ -751,7 +848,7 @@ class strong4dvar(object):
             b = self.blkh_adj(xb, b)
 
             deltax0 = np.zeros(b.shape)
-            (deltax, k) = self._ConjugateGradient(deltax0, \
+            (deltax, k) = ConjugateGradient(deltax0, \
                           self.HessianProduct, b, tol, xb)
         else:
             raise ValueError("Choose a valid option.")
@@ -759,109 +856,3 @@ class strong4dvar(object):
         xa = xb + deltax
 
         return (xa, k)
-
-    def _ConjugateGradient(self, x0, matrix_vector_product, b, tol, xb):
-        """Conjugate gradient method for use in incremental function.
-
-        Conjugate gradient method to solve a linear system within
-        tolerance. This code is written for use with the Hessian of
-        the 4D-Var cost functional, which requires the
-        four-dimensional guess state xb as an argument.
-
-        Arguments:
-            x0: Initial guess to initiate conjugate gradient method
-            matrix_vector_product: Function matrix-vector product
-            b: Right-hand-side of linear system
-            tol: Error tolerance
-            xb: Three-dimensional background state
-
-        Returns:
-            x: Solution to linear system
-            k: Number of iterations to convergence within tolerance
-        """
-        x = x0.copy()
-        r = b - matrix_vector_product(x, xb)
-        p = r.copy()
-        k = 0
-        n = len(x0)
-        r_old_scalar = np.dot(r, r)
-        r_new_scalar = r_old_scalar
-        
-        while(k < n and math.sqrt(r_new_scalar) >= tol):
-            A_times_p = matrix_vector_product(p, xb)
-            alpha = r_old_scalar / np.dot(p, A_times_p)
-            x += alpha * p
-            r -= alpha * A_times_p
-            r_new_scalar = np.dot(r, r)
-            beta = r_new_scalar / r_old_scalar
-            p *= beta
-            p += r
-            r_old_scalar = r_new_scalar
-            
-            k += 1
-
-        return (x, k)
-
-    def _lower_triangular_band_product(self, Lb, x):
-        """Computes the product L * x, where L is lower triangular.
-
-        Arguments:
-            Lb: Banded lower triangular matrix.
-            x: Vector to multiply.
-
-        Returns:
-            y: Matrix-vector product L * x.
-        """
-        (p_plus_one, n) = Lb.shape
-        p = p_plus_one - 1   # Bandwidth of the matrix
-        y = np.empty(n)
-
-        for i in xrange(p):
-            temp = 0.0
-
-            for j in xrange(i + 1):
-                temp += Lb[i - j, j] * x[j]
-
-            y[i] = temp
-
-        for i in xrange(p, n):
-            temp = 0.0
-
-            for j in xrange(i - p, i + 1):
-                temp += Lb[i - j, j] * x[j]
-
-            y[i] = temp
-
-        return y
-
-    def _lower_triangular_band_product_adj(self, Lb, x):
-        """Computes the product Lb.T * x, where Lb is lower triangular.
-
-        Arguments:
-            Lb: Banded lower triangular matrix.
-            x: Vector to multiply.
-
-        Returns:
-            y: Matrix-vector product L.T * x.
-        """
-        (p_plus_one, n) = Lb.shape
-        p = p_plus_one - 1   # Bandwidth of the matrix
-        y = np.empty(n)
-
-        for i in xrange(n - p):
-            temp = 0.0
-
-            for j in xrange(i, i + p_plus_one):
-                temp += Lb[j - i, i] * x[j]
-
-            y[i] = temp
-
-        for i in xrange(n - p, n):
-            temp = 0.0
-
-            for j in xrange(i, n):
-                temp += Lb[j - i, i] * x[j]
-
-            y[i] = temp
-
-        return y

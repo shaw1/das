@@ -38,14 +38,15 @@ class hy4dvar(en4dvar):
 
         sqrtBprod_adj: B^(T/2) * x.
     """
-    def __init__(self, model, Bdata, sigo_squared, window, obsloc, Cb, alpha,
-                 sigb_squared_c):
+    def __init__(self, model, Bdata, sigo_squared, window, obsloc, \
+                 Cb, alpha, sigb_squared_c):
         """Initializes the class object to the specified inputs.
 
-        Descriptions of each data member is provided in the comments above.
+        Descriptions of each data member is provided in the comments
+        above.
         """
-        super(hy4dvar, self).__init__(model, Bdata, sigo_squared, window, \
-                                      obsloc, Cb)
+        super(hy4dvar, self).__init__(model, Bdata, sigo_squared, \
+                                      window, obsloc, Cb)
 
         self.alpha = alpha
         self.sigb_squared_c = sigb_squared_c
@@ -73,8 +74,9 @@ class hy4dvar(en4dvar):
     def sqrtBprod(self, x):
         """Product of B^(1 / 2) with x, using covariance localization.
 
-        The matrix is a rectangular matrix of size n by n * (Ne + 1), and is
-        B = [sqrt(1 - alpha) * (C * Be)^(1 / 2)   sqrt(alpha) * Bc^(1 / 2)].
+        The matrix is a rectangular matrix of size n by n * (Ne + 1),
+        and is B = [sqrt(1 - alpha) * (C * Be)^(1 / 2) sqrt(alpha) *
+        Bc^(1 / 2)].
         
         Argument:
             x: The vector to multiply of length n.
@@ -95,8 +97,9 @@ class hy4dvar(en4dvar):
     def sqrtBprod_adj(self, x):
         """Product of B^(T / 2) with x, using covariance localization.
 
-        The matrix is a rectangular matrix of size n by n * (Ne + 1), and is
-        B = [sqrt(1 - alpha) * (C * Be)^(1 / 2)   sqrt(alpha) * Bc^(1 / 2)].
+        The matrix is a rectangular matrix of size n by n * (Ne + 1),
+        and is B = [sqrt(1 - alpha) * (C * Be)^(1 / 2) sqrt(alpha) *
+        Bc^(1 / 2)].
         
         Argument:
             x: The vector to multiply of length n * (Ne + 1).
